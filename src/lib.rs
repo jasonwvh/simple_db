@@ -4,7 +4,6 @@ use std::io;
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter, SeekFrom};
 use std::path::Path;
-
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use serde_derive::{Deserialize, Serialize};
 
@@ -17,22 +16,22 @@ pub struct KeyValuePair {
   pub value: ByteString,
 }
 
-#[derive(Debug)] // #[derive(Debug)]
-pub struct Database {
+#[derive(Debug)]
+pub struct Table {
   f: File,
   pub index: HashMap<ByteString, u64>,
 }
 
-impl Database {
+impl Table {
   pub fn open(path: &Path) -> io::Result<Self> {
-    let f = OpenOptions::new() 
-      .read(true)
-      .write(true)
-      .create(true)
-      .append(true)
-      .open(path)?;
+    let f = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .append(true)
+        .open(path)?;
     let index = HashMap::new();
-    Ok(Database { f, index })
+    Ok(Table { f, index })
   }
 
   pub fn load(&mut self) -> io::Result<()> {
@@ -41,7 +40,7 @@ impl Database {
     loop {
       let current_position = f.seek(SeekFrom::Current(0))?;
 
-      let maybe_kv = Database::process_record(&mut f);
+      let maybe_kv = Table::process_record(&mut f);
       let kv = match maybe_kv {
         Ok(kv) => kv,
         Err(err) => {
@@ -78,6 +77,16 @@ impl Database {
     Ok(KeyValuePair { key, value })
   }
 
+  pub fn list(&mut self) -> io::Result<Vec<KeyValuePair>> {
+    let mut result = Vec::new();
+    let positions: Vec<(ByteString, u64)> = self.index.iter().map(|(k, &v)| (k.clone(), v)).collect();
+    for (key, position) in positions {
+      if let Ok(kv) = self.get_at(position) {
+        result.push(KeyValuePair { key, value: kv.value });
+      }
+    }
+    Ok(result)
+  }
 
   pub fn get(&mut self, key: &ByteStr) -> io::Result<Option<ByteString>> {
     let position = match self.index.get(key) {
@@ -93,7 +102,7 @@ impl Database {
   pub fn get_at(&mut self, position: u64) -> io::Result<KeyValuePair> {
     let mut f = BufReader::new(&mut self.f);
     f.seek(SeekFrom::Start(position))?;
-    let kv = Database::process_record(&mut f)?;
+    let kv = Table::process_record(&mut f)?;
 
     Ok(kv)
   }
@@ -127,5 +136,30 @@ impl Database {
     self.index.insert(key.to_vec(), current_position);
     Ok(())
   }
+}
 
+#[derive(Debug)]
+pub struct Database {
+  tables: HashMap<String, Table>,
+}
+
+impl Database {
+  pub fn open(path: &Path) -> io::Result<Self> {
+    let tables = HashMap::new();
+    Ok(Database { tables })
+  }
+
+  pub fn create_table(&mut self, name: &str, path: &Path) -> io::Result<()> {
+    let table = Table::open(path)?;
+    self.tables.insert(name.to_string(), table);
+    Ok(())
+  }
+
+  pub fn get_table(&self, name: &str) -> Option<&Table> {
+    self.tables.get(name)
+  }
+
+  pub fn get_table_mut(&mut self, name: &str) -> Option<&mut Table> {
+    self.tables.get_mut(name)
+  }
 }
